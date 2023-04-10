@@ -56,8 +56,6 @@ struct ProgramState {
     bool ImGuiEnabled = false;
     Camera camera;
     bool CameraMouseMovementUpdateEnabled = true;
-    glm::vec3 backpackPosition = glm::vec3(0.0f);
-    float backpackScale = 1.0f;
     PointLight pointLight;
     ProgramState()
             : camera(glm::vec3(0.0f, 0.0f, 3.0f)) {}
@@ -137,7 +135,7 @@ int main() {
     }
 
     // tell stb_image.h to flip loaded texture's on the y-axis (before loading model).
-    stbi_set_flip_vertically_on_load(true);
+    stbi_set_flip_vertically_on_load(false);
 
     programState = new ProgramState;
     programState->LoadFromFile("resources/program_state.txt");
@@ -165,18 +163,20 @@ int main() {
 
     // load models
     // -----------
-    Model ourModel("resources/objects/backpack/backpack.obj");
-    ourModel.SetShaderTextureNamePrefix("material.");
+    Model lamppost("resources/objects/lamppost/lamppost.obj");
+    Model grass("resources/objects/grass/10450_Rectangular_Grass_Patch_v1_iterations-2.obj");
+    Model house("resources/objects/Brick_House/Brick_House.obj");
+    Model tree("resources/objects/tree/Tree_Dry_1.obj");
 
     PointLight& pointLight = programState->pointLight;
     pointLight.position = glm::vec3(4.0f, 4.0, 0.0);
-    pointLight.ambient = glm::vec3(0.1, 0.1, 0.1);
+    pointLight.ambient = glm::vec3(1, 1, 1);
     pointLight.diffuse = glm::vec3(0.6, 0.6, 0.6);
     pointLight.specular = glm::vec3(1.0, 1.0, 1.0);
 
     pointLight.constant = 1.0f;
-    pointLight.linear = 0.09f;
-    pointLight.quadratic = 0.032f;
+    pointLight.linear = 0;
+    pointLight.quadratic = 0;
 
 
 
@@ -204,7 +204,7 @@ int main() {
 
         // don't forget to enable shader before setting uniforms
         ourShader.use();
-        pointLight.position = glm::vec3(4.0 * cos(currentFrame), 4.0f, 4.0 * sin(currentFrame));
+        pointLight.position = glm::vec3(4.0 * cos(currentFrame), 50.0f, 4.0 * sin(currentFrame));
         ourShader.setVec3("pointLight.position", pointLight.position);
         ourShader.setVec3("pointLight.ambient", pointLight.ambient);
         ourShader.setVec3("pointLight.diffuse", pointLight.diffuse);
@@ -221,13 +221,93 @@ int main() {
         ourShader.setMat4("projection", projection);
         ourShader.setMat4("view", view);
 
-        // render the loaded model
+        // lamppost
         glm::mat4 model = glm::mat4(1.0f);
-        model = glm::translate(model,
-                               programState->backpackPosition); // translate it down so it's at the center of the scene
-        model = glm::scale(model, glm::vec3(programState->backpackScale));    // it's a bit too big for our scene, so scale it down
+        model = glm::translate(model,glm::vec3(0, 1.2, 0));
         ourShader.setMat4("model", model);
-        ourModel.Draw(ourShader);
+        lamppost.Draw(ourShader);
+
+        // house1
+        model = glm::mat4(1.0f);
+        model = glm::scale(model, glm::vec3(2.5));
+        model = glm::translate(model,glm::vec3(0, 1, -15));
+        ourShader.setMat4("model", model);
+        house.Draw(ourShader);
+
+        // house2
+        model = glm::mat4(1.0f);
+        model = glm::scale(model, glm::vec3(2.5));
+        model = glm::translate(model,glm::vec3(-15, 1, 0));
+        model = glm::rotate(model, M_PI_2f, glm::vec3(0, 1, 0));
+        ourShader.setMat4("model", model);
+        house.Draw(ourShader);
+
+        // house3
+        model = glm::mat4(1.0f);
+        model = glm::scale(model, glm::vec3(2.5));
+        model = glm::translate(model,glm::vec3(15, 1, 0));
+        model = glm::rotate(model, -M_PI_2f, glm::vec3(0, 1, 0));
+        ourShader.setMat4("model", model);
+        house.Draw(ourShader);
+
+        // grass1
+        model = glm::mat4(1.0f);
+        model = glm::scale(model, glm::vec3(0.2));    // it's a bit too big for our scene, so scale it down
+        model = glm::rotate(model, -M_PI_2f, glm::vec3(1, 0, 0));
+        ourShader.setMat4("model", model);
+        grass.Draw(ourShader);
+
+        // grass2
+        model = glm::mat4(1.0f);
+        model = glm::scale(model, glm::vec3(0.2));    // it's a bit too big for our scene, so scale it down
+        model = glm::rotate(model, -M_PI_2f, glm::vec3(1, 0, 0));
+        model = glm::translate(model, glm::vec3(200, 0, 0));
+        ourShader.setMat4("model", model);
+        grass.Draw(ourShader);
+
+        // grass3
+        model = glm::mat4(1.0f);
+        model = glm::scale(model, glm::vec3(0.2));    // it's a bit too big for our scene, so scale it down
+        model = glm::rotate(model, -M_PI_2f, glm::vec3(1, 0, 0));
+        model = glm::translate(model, glm::vec3(-200, 0, 0));
+        ourShader.setMat4("model", model);
+        grass.Draw(ourShader);
+
+        // grass4
+        model = glm::mat4(1.0f);
+        model = glm::scale(model, glm::vec3(0.2));    // it's a bit too big for our scene, so scale it down
+        model = glm::rotate(model, -M_PI_2f, glm::vec3(1, 0, 0));
+        model = glm::translate(model, glm::vec3(0, 200, 0));
+        ourShader.setMat4("model", model);
+        grass.Draw(ourShader);
+
+        // grass5
+        model = glm::mat4(1.0f);
+        model = glm::scale(model, glm::vec3(0.2));    // it's a bit too big for our scene, so scale it down
+        model = glm::rotate(model, -M_PI_2f, glm::vec3(1, 0, 0));
+        model = glm::translate(model, glm::vec3(200, 200, 0));
+        ourShader.setMat4("model", model);
+        grass.Draw(ourShader);
+
+        // grass6
+        model = glm::mat4(1.0f);
+        model = glm::scale(model, glm::vec3(0.2));    // it's a bit too big for our scene, so scale it down
+        model = glm::rotate(model, -M_PI_2f, glm::vec3(1, 0, 0));
+        model = glm::translate(model, glm::vec3(-200, 200, 0));
+        ourShader.setMat4("model", model);
+        grass.Draw(ourShader);
+
+        model = glm::mat4(1.0f);
+        model = glm::scale(model, glm::vec3(0.003));    // it's a bit too big for our scene, so scale it down
+        model = glm::translate(model, glm::vec3(10000, 10, -10000));
+        ourShader.setMat4("model", model);
+        tree.Draw(ourShader);
+
+        model = glm::mat4(1.0f);
+        model = glm::scale(model, glm::vec3(0.003));    // it's a bit too big for our scene, so scale it down
+        model = glm::translate(model, glm::vec3(-10000, 10, -10000));
+        ourShader.setMat4("model", model);
+        tree.Draw(ourShader);
 
         if (programState->ImGuiEnabled)
             DrawImGui(programState);
@@ -312,8 +392,6 @@ void DrawImGui(ProgramState *programState) {
         ImGui::Text("Hello text");
         ImGui::SliderFloat("Float slider", &f, 0.0, 1.0);
         ImGui::ColorEdit3("Background color", (float *) &programState->clearColor);
-        ImGui::DragFloat3("Backpack position", (float*)&programState->backpackPosition);
-        ImGui::DragFloat("Backpack scale", &programState->backpackScale, 0.05, 0.1, 4.0);
 
         ImGui::DragFloat("pointLight.constant", &programState->pointLight.constant, 0.05, 0.0, 1.0);
         ImGui::DragFloat("pointLight.linear", &programState->pointLight.linear, 0.05, 0.0, 1.0);
