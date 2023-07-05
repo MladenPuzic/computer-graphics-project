@@ -6,3 +6,7 @@ Inspirisano ulicnim lampama iz igrice The Beginner's Guide. Iz kategorije A kori
 
 WASD - kretanje
 Mouse - kamera
+
+DODATAK: 
+Naknadno uradjen Point Shadows iz kategorije B.
+Demo senki: https://youtu.be/1JvPwSE_p6M

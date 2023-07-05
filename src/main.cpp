@@ -17,16 +17,12 @@
 #include <iostream>
 
 void framebuffer_size_callback(GLFWwindow *window, int width, int height);
-
 void mouse_callback(GLFWwindow *window, double xpos, double ypos);
-
 void scroll_callback(GLFWwindow *window, double xoffset, double yoffset);
-
 void processInput(GLFWwindow *window);
-
 void key_callback(GLFWwindow *window, int key, int scancode, int action, int mods);
-
 unsigned int loadCubemap(vector<std::string> faces);
+void renderScene(Shader &ourShader, Model lamppost, Model house, Model ground, Model tree, Model grass);
 
 // settings
 const unsigned int SCR_WIDTH = 800;
@@ -164,6 +160,9 @@ int main() {
     Shader ourShader("resources/shaders/2.model_lighting.vs", "resources/shaders/2.model_lighting.fs");
     Shader skyboxShader("resources/shaders/skybox.vs", "resources/shaders/skybox.fs");
     Shader pointlightShader("resources/shaders/pointlight.vs", "resources/shaders/pointlight.fs");
+    Shader simpleDepthShader("resources/shaders/point_shadows_depth.vs",
+                             "resources/shaders/point_shadows_depth.fs",
+                             "resources/shaders/point_shadows_depth.gs");
     // load models
     // -----------
     Model lamppost("resources/objects/lamppost/lamppost.obj");
@@ -245,7 +244,7 @@ int main() {
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
     skyboxShader.use();
-    skyboxShader.setInt("skybox", 0);
+    skyboxShader.setInt("skybox", 18);
 
     PointLight& pointLight = programState->pointLight;
     pointLight.position = glm::vec3(0, 11.5, 0);
@@ -254,8 +253,8 @@ int main() {
     pointLight.specular = glm::vec3(0.3, 0.3, 0.3);
 
     pointLight.constant = 1.0f;
-    pointLight.linear = 0.007f;
-    pointLight.quadratic = 0.0002f;
+    pointLight.linear = 0.0014f;
+    pointLight.quadratic = 0.000007f;
 
     // draw in wireframe
     // glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
@@ -318,6 +317,29 @@ int main() {
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)0);
     glEnableVertexAttribArray(0);
 
+    // configure depth map FBO
+    // -----------------------
+    const unsigned int SHADOW_WIDTH = 1024, SHADOW_HEIGHT = 1024;
+    unsigned int depthMapFBO;
+    glGenFramebuffers(1, &depthMapFBO);
+    // create depth cubemap texture
+    unsigned int depthCubemap;
+    glGenTextures(1, &depthCubemap);
+    glBindTexture(GL_TEXTURE_CUBE_MAP, depthCubemap);
+    for (unsigned int i = 0; i < 6; ++i)
+        glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, 0, GL_DEPTH_COMPONENT, SHADOW_WIDTH, SHADOW_HEIGHT, 0, GL_DEPTH_COMPONENT, GL_FLOAT, NULL);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+    // attach depth texture as FBO's depth buffer
+    glBindFramebuffer(GL_FRAMEBUFFER, depthMapFBO);
+    glFramebufferTexture(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, depthCubemap, 0);
+    glDrawBuffer(GL_NONE);
+    glReadBuffer(GL_NONE);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
     // render loop
     // -----------
     while (!glfwWindowShouldClose(window)) {
@@ -331,17 +353,44 @@ int main() {
         // -----
         processInput(window);
 
-
         // render
         // ------
         glClearColor(programState->clearColor.r, programState->clearColor.g, programState->clearColor.b, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
+        // 0. create depth cubemap transformation matrices
+        // -----------------------------------------------
+        float near_plane = 1.0f;
+        float far_plane = 50.0f;
+        glm::mat4 shadowProj = glm::perspective(glm::radians(90.0f), (float)SHADOW_WIDTH / (float)SHADOW_HEIGHT, near_plane, far_plane);
+        std::vector<glm::mat4> shadowTransforms;
+        shadowTransforms.push_back(shadowProj * glm::lookAt(pointLight.position, pointLight.position + glm::vec3(1.0f, 0.0f, 0.0f), glm::vec3(0.0f, -1.0f, 0.0f)));
+        shadowTransforms.push_back(shadowProj * glm::lookAt(pointLight.position, pointLight.position + glm::vec3(-1.0f, 0.0f, 0.0f), glm::vec3(0.0f, -1.0f, 0.0f)));
+        shadowTransforms.push_back(shadowProj * glm::lookAt(pointLight.position, pointLight.position + glm::vec3(0.0f, 1.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f)));
+        shadowTransforms.push_back(shadowProj * glm::lookAt(pointLight.position, pointLight.position + glm::vec3(0.0f, -1.0f, 0.0f), glm::vec3(0.0f, 0.0f, -1.0f)));
+        shadowTransforms.push_back(shadowProj * glm::lookAt(pointLight.position, pointLight.position + glm::vec3(0.0f, 0.0f, 1.0f), glm::vec3(0.0f, -1.0f, 0.0f)));
+        shadowTransforms.push_back(shadowProj * glm::lookAt(pointLight.position, pointLight.position + glm::vec3(0.0f, 0.0f, -1.0f), glm::vec3(0.0f, -1.0f, 0.0f)));
+
+        // 1. render scene to depth cubemap
+        // --------------------------------
+        glViewport(0, 0, SHADOW_WIDTH, SHADOW_HEIGHT);
+        glBindFramebuffer(GL_FRAMEBUFFER, depthMapFBO);
+        glClear(GL_DEPTH_BUFFER_BIT);
+        simpleDepthShader.use();
+        for (unsigned int i = 0; i < 6; ++i)
+            simpleDepthShader.setMat4("shadowMatrices[" + std::to_string(i) + "]", shadowTransforms[i]);
+        simpleDepthShader.setFloat("far_plane", far_plane);
+        simpleDepthShader.setVec3("lightPos", pointLight.position);
+        renderScene(simpleDepthShader, lamppost, house, ground, tree, grass);
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+        glm::mat4 view = programState->camera.GetViewMatrix();
         glm::mat4 projection = glm::perspective(glm::radians(programState->camera.Zoom),
                                                 (float) SCR_WIDTH / (float) SCR_HEIGHT, 0.1f, 100.0f);
-        glm::mat4 view = programState->camera.GetViewMatrix();
-
-        //skybox
+        // SKYBOX
+        // -------------------------
+        glViewport(0, 0, SCR_WIDTH, SCR_HEIGHT);
+        glClear(GL_COLOR_BUFFER_BIT);
         glDepthMask(GL_FALSE);
         skyboxShader.use();
         view = glm::mat4(glm::mat3(programState->camera.GetViewMatrix())); // remove translation from the view matrix
@@ -349,16 +398,17 @@ int main() {
         skyboxShader.setMat4("projection", projection);
 
         glBindVertexArray(skyboxVAO);
-        glActiveTexture(GL_TEXTURE0);
+        glActiveTexture(GL_TEXTURE18);
         glBindTexture(GL_TEXTURE_CUBE_MAP, skyboxTexture);
         glDrawArrays(GL_TRIANGLES, 0, 36);
         glBindVertexArray(0);
         glDepthMask(GL_TRUE);
 
-        // don't forget to enable shader before setting uniforms
+        // 2. render scene as normal
+        // -------------------------
+        glClear( GL_DEPTH_BUFFER_BIT);
         ourShader.use();
         view = programState->camera.GetViewMatrix();
-        //pointLight.position = glm::vec3(4.0 * cos(currentFrame), 10.0f, 4.0 * sin(currentFrame));
         ourShader.setVec3("pointLight.position", pointLight.position);
         ourShader.setVec3("pointLight.ambient", pointLight.ambient);
         ourShader.setVec3("pointLight.diffuse", pointLight.diffuse);
@@ -368,96 +418,19 @@ int main() {
         ourShader.setFloat("pointLight.quadratic", pointLight.quadratic);
         ourShader.setVec3("viewPosition", programState->camera.Position);
         ourShader.setFloat("material.shininess", 64.0f);
+        ourShader.setFloat("far_plane", far_plane);
+        ourShader.setInt("depthMap", 15);
         // view/projection transformations
         ourShader.setMat4("projection", projection);
         ourShader.setMat4("view", view);
-
-        // lamppost
-        glm::mat4 model = glm::mat4(1.0f);
-        model = glm::translate(model, glm::vec3(0, 1.2, 0));
-        ourShader.setMat4("model", model);
-        lamppost.Draw(ourShader);
-
-        glEnable(GL_CULL_FACE);
-        // house1
-        model = glm::mat4(1.0f);
-        model = glm::scale(model, glm::vec3(2.5));
-        model = glm::translate(model, glm::vec3(0, 1, -15));
-        ourShader.setMat4("model", model);
-        house.Draw(ourShader);
-
-        // house2
-        model = glm::mat4(1.0f);
-        model = glm::scale(model, glm::vec3(2.5));
-        model = glm::translate(model, glm::vec3(-15, 1, 0));
-        model = glm::rotate(model, M_PI_2f, glm::vec3(0, 1, 0));
-        ourShader.setMat4("model", model);
-        house.Draw(ourShader);
-
-        // house3
-        model = glm::mat4(1.0f);
-        model = glm::scale(model, glm::vec3(2.5));
-        model = glm::translate(model, glm::vec3(15, 1, 0));
-        model = glm::rotate(model, -M_PI_2f, glm::vec3(0, 1, 0));
-        ourShader.setMat4("model", model);
-        house.Draw(ourShader);
-        glDisable(GL_CULL_FACE);
-
-        vector<glm::vec3> groundPos =
-                {
-                        glm::vec3(0, 0, 0),
-                        glm::vec3(200, 0, 0),
-                        glm::vec3(-200, 0, 0),
-                        glm::vec3(0, 200, 0),
-                        glm::vec3(200, 200, 0),
-                        glm::vec3(-200, 200, 0)
-                };
-
-        for (int groundIdx = 0; groundIdx < groundPos.size(); groundIdx++)
-        {
-            model = glm::mat4(1.0f);
-            model = glm::scale(model, glm::vec3(0.2));    // it's a bit too big for our scene, so scale it down
-            model = glm::rotate(model, -M_PI_2f, glm::vec3(1, 0, 0));
-            model = glm::translate(model, groundPos[groundIdx]);
-            ourShader.setMat4("model", model);
-            ground.Draw(ourShader);
-        }
-
-        model = glm::mat4(1.0f);
-        model = glm::scale(model, glm::vec3(0.003));    // it's a bit too big for our scene, so scale it down
-        model = glm::translate(model, glm::vec3(10000, 10, -10000));
-        ourShader.setMat4("model", model);
-        tree.Draw(ourShader);
-
-        model = glm::mat4(1.0f);
-        model = glm::scale(model, glm::vec3(0.003));    // it's a bit too big for our scene, so scale it down
-        model = glm::translate(model, glm::vec3(-10000, 10, -10000));
-        ourShader.setMat4("model", model);
-        tree.Draw(ourShader);
-
-        vector<glm::vec3> grassPos =
-                {
-                        glm::vec3(-3, 1, 6),
-                        glm::vec3(7, 1, -5),
-                        glm::vec3(10, 1, 5),
-                        glm::vec3(-12, 1, -5),
-                        glm::vec3(-4, 1, 1),
-                        glm::vec3(-12, 1, 11)
-                };
-
-        for (int grassIdx = 0; grassIdx < grassPos.size(); grassIdx++) {
-            model = glm::mat4(1.0f);
-            model = glm::scale(model, glm::vec3(1.5));
-            model = glm::translate(model, grassPos[grassIdx]);
-            ourShader.setMat4("model", model);
-            grass.Draw(ourShader);
-        }
-
+        glActiveTexture(GL_TEXTURE15);
+        glBindTexture(GL_TEXTURE_CUBE_MAP, depthCubemap);
+        renderScene(ourShader, lamppost, house, ground, tree, grass);
         // light
         pointlightShader.use();
         pointlightShader.setMat4("projection", projection);
         pointlightShader.setMat4("view", view);
-        model = glm::mat4(1.0f);
+        glm::mat4 model = glm::mat4(1.0f);
         model = glm::translate(model, pointLight.position);
         model = glm::scale(model, glm::vec3(1.2f)); // a smaller cube
         pointlightShader.setMat4("model", model);
@@ -467,8 +440,6 @@ int main() {
 
         if (programState->ImGuiEnabled)
             DrawImGui(programState);
-
-
 
         // glfw: swap buffers and poll IO events (keys pressed/released, mouse moved etc.)
         // -------------------------------------------------------------------------------
@@ -485,6 +456,91 @@ int main() {
     // ------------------------------------------------------------------
     glfwTerminate();
     return 0;
+}
+
+// renders the 3D scene
+// --------------------
+void renderScene(Shader &ourShader, Model lamppost, Model house, Model ground, Model tree, Model grass)
+{
+    // lamppost
+    glm::mat4 model = glm::mat4(1.0f);
+    model = glm::translate(model, glm::vec3(0, 1.2, 0));
+    ourShader.setMat4("model", model);
+    lamppost.Draw(ourShader);
+
+    glEnable(GL_CULL_FACE);
+    // house1
+    model = glm::mat4(1.0f);
+    model = glm::scale(model, glm::vec3(2.5));
+    model = glm::translate(model, glm::vec3(0, 1, -15));
+    ourShader.setMat4("model", model);
+    house.Draw(ourShader);
+
+    // house2
+    model = glm::mat4(1.0f);
+    model = glm::scale(model, glm::vec3(2.5));
+    model = glm::translate(model, glm::vec3(-15, 1, 0));
+    model = glm::rotate(model, M_PI_2f, glm::vec3(0, 1, 0));
+    ourShader.setMat4("model", model);
+    house.Draw(ourShader);
+
+    // house3
+    model = glm::mat4(1.0f);
+    model = glm::scale(model, glm::vec3(2.5));
+    model = glm::translate(model, glm::vec3(15, 1, 0));
+    model = glm::rotate(model, -M_PI_2f, glm::vec3(0, 1, 0));
+    ourShader.setMat4("model", model);
+    house.Draw(ourShader);
+    glDisable(GL_CULL_FACE);
+
+    vector<glm::vec3> groundPos =
+            {
+                    glm::vec3(0, 0, 0),
+                    glm::vec3(200, 0, 0),
+                    glm::vec3(-200, 0, 0),
+                    glm::vec3(0, 200, 0),
+                    glm::vec3(200, 200, 0),
+                    glm::vec3(-200, 200, 0)
+            };
+
+    for (int groundIdx = 0; groundIdx < groundPos.size(); groundIdx++)
+    {
+        model = glm::mat4(1.0f);
+        model = glm::scale(model, glm::vec3(0.2));    // it's a bit too big for our scene, so scale it down
+        model = glm::rotate(model, -M_PI_2f, glm::vec3(1, 0, 0));
+        model = glm::translate(model, groundPos[groundIdx]);
+        ourShader.setMat4("model", model);
+        ground.Draw(ourShader);
+    }
+
+    model = glm::mat4(1.0f);
+    model = glm::scale(model, glm::vec3(0.003));    // it's a bit too big for our scene, so scale it down
+    model = glm::translate(model, glm::vec3(10000, 10, -10000));
+    ourShader.setMat4("model", model);
+    tree.Draw(ourShader);
+
+    model = glm::mat4(1.0f);
+    model = glm::scale(model, glm::vec3(0.003));    // it's a bit too big for our scene, so scale it down
+    model = glm::translate(model, glm::vec3(-10000, 10, -10000));
+    ourShader.setMat4("model", model);
+    tree.Draw(ourShader);
+
+    vector<glm::vec3> grassPos =
+            {
+                    glm::vec3(-18.5, 1, 19),
+                    glm::vec3(19, 1, -25),
+                    glm::vec3(20, 1, 17),
+                    glm::vec3(-26, 1, -27.5),
+                    glm::vec3(-25, 1, -23),
+            };
+
+    for (int grassIdx = 0; grassIdx < grassPos.size(); grassIdx++) {
+        model = glm::mat4(1.0f);
+        model = glm::scale(model, glm::vec3(1.5));
+        model = glm::translate(model, grassPos[grassIdx]);
+        ourShader.setMat4("model", model);
+        grass.Draw(ourShader);
+    }
 }
 
 // process all input: query GLFW whether relevant keys are pressed/released this frame and react accordingly
